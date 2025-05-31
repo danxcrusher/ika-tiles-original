@@ -40,6 +40,8 @@ const songData: Record<string, { speed: number; name: string }> = {
   edm: { speed: 8, name: "EDM Beat" },
 };
 
+const FALL_DURATION_SECONDS = 2.0; // Time in seconds for a note to fall from top to hit line
+
 const GameBoard: React.FC<GameBoardProps> = ({ songId, audioUrl, onGameOver }) => {
   const [tiles, setTiles] = useState<Tile[]>([]);
   const [score, setScore] = useState(0);
@@ -53,11 +55,14 @@ const GameBoard: React.FC<GameBoardProps> = ({ songId, audioUrl, onGameOver }) =
   const gameLoopRef = useRef<number | null>(null);
   const nextTileIdRef = useRef(1);
   const lastTileTimeRef = useRef(0);
-  const speed = loadedBeatmap?.metadata?.recommendedSpeed || songData[songId]?.speed || 5;
   const boardHeight = 600;
   const tileHeight = 150;
   const lanes = 4;
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Calculate speed based on FALL_DURATION_SECONDS to ensure notes fall the boardHeight in that time
+  // Assuming 60 FPS for requestAnimationFrame for frame-based speed calculation
+  const speed = boardHeight / (FALL_DURATION_SECONDS * 60);
 
   // --- Beatmap Loading ---
   useEffect(() => {
@@ -175,8 +180,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ songId, audioUrl, onGameOver }) =
       return;
     }
 
-    const LOOKAHEAD_SECONDS = (boardHeight / speed) / 60;
-
     const updateGame = () => {
       if (!audioRef.current) {
         gameLoopRef.current = requestAnimationFrame(updateGame);
@@ -187,7 +190,8 @@ const GameBoard: React.FC<GameBoardProps> = ({ songId, audioUrl, onGameOver }) =
       let generatedFromBeatmap = false;
       if (loadedBeatmap && loadedBeatmap.notes.length > 0 && nextNoteIndex < loadedBeatmap.notes.length) {
         const nextNote = loadedBeatmap.notes[nextNoteIndex];
-        if (currentTime >= nextNote.time - LOOKAHEAD_SECONDS) {
+        // Spawn note if current time is within FALL_DURATION_SECONDS of its target hit time
+        if (currentTime >= nextNote.time - FALL_DURATION_SECONDS) {
           generateTile(nextNote);
           setNextNoteIndex(prev => prev + 1);
           generatedFromBeatmap = true;
