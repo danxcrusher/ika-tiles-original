@@ -6,10 +6,28 @@ interface Tile {
   y: number;
   hit: boolean;
   missed: boolean;
+  targetTime?: number; // Time the tile should be tapped
+}
+
+interface Note {
+  time: number; // Time in seconds from song start for the tile to be tapped
+  lane: number;
+}
+
+interface BeatmapMetadata {
+  songName?: string;
+  artistName?: string;
+  recommendedSpeed?: number;
+}
+
+interface BeatmapFile {
+  metadata?: BeatmapMetadata;
+  notes: Note[];
 }
 
 interface GameBoardProps {
   songId: string;
+  audioUrl: string;
   onGameOver: (score: number) => void;
 }
 
@@ -22,51 +40,120 @@ const songData: Record<string, { speed: number; name: string }> = {
   edm: { speed: 8, name: "EDM Beat" },
 };
 
-const GameBoard: React.FC<GameBoardProps> = ({ songId, onGameOver }) => {
+const GameBoard: React.FC<GameBoardProps> = ({ songId, audioUrl, onGameOver }) => {
   const [tiles, setTiles] = useState<Tile[]>([]);
   const [score, setScore] = useState(0);
   const [combo, setCombo] = useState(0);
   const [showPerfect, setShowPerfect] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [loadedBeatmap, setLoadedBeatmap] = useState<BeatmapFile | null>(null);
+  const [isLoadingBeatmap, setIsLoadingBeatmap] = useState(true);
+  const [nextNoteIndex, setNextNoteIndex] = useState(0);
   const boardRef = useRef<HTMLDivElement>(null);
   const gameLoopRef = useRef<number | null>(null);
   const nextTileIdRef = useRef(1);
   const lastTileTimeRef = useRef(0);
-  const speed = songData[songId]?.speed || 5;
+  const speed = loadedBeatmap?.metadata?.recommendedSpeed || songData[songId]?.speed || 5;
   const boardHeight = 600;
   const tileHeight = 150;
   const lanes = 4;
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Handle tile generation
-  const generateTile = useCallback(() => {
-    const now = Date.now();
-    // Only generate a new tile if enough time has passed
-    if (now - lastTileTimeRef.current < 500) return;
+  // --- Beatmap Loading ---
+  useEffect(() => {
+    const loadBeatmap = async () => {
+      if (!songId) return;
+      setIsLoadingBeatmap(true);
+      setLoadedBeatmap(null);
+      setNextNoteIndex(0);
+      try {
+        const response = await fetch(`/beatmaps/${songId}.json`);
+        if (!response.ok) {
+          console.warn(`Beatmap not found for ${songId}. No beatmap will be used.`);
+          setLoadedBeatmap({ notes: [] });
+        } else {
+          const data: BeatmapFile = await response.json();
+          if (data.notes) {
+            data.notes.sort((a, b) => a.time - b.time);
+          }
+          setLoadedBeatmap(data);
+        }
+      } catch (error) {
+        console.error(`Error loading or parsing beatmap for ${songId}:`, error);
+        setLoadedBeatmap({ notes: [] });
+      } finally {
+        setIsLoadingBeatmap(false);
+      }
+    };
 
-    lastTileTimeRef.current = now;
-    const lane = Math.floor(Math.random() * lanes);
+    loadBeatmap();
+  }, [songId]);
+
+  // --- Audio Handling Effect ---
+  useEffect(() => {
+    if (!audioUrl) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      return;
+    }
+
+    if (!audioRef.current || audioRef.current.src !== new URL(audioUrl, window.location.origin).toString()) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      audioRef.current = new Audio(audioUrl);
+      audioRef.current.load();
+    }
+
+    const audio = audioRef.current;
+    if (isPaused) {
+      audio.pause();
+    } else {
+      audio.play().catch(error => console.error("Error playing audio:", error));
+    }
+
+    return () => {
+      if (audio) {
+        audio.pause();
+      }
+    };
+  }, [audioUrl, isPaused]);
+
+  // Handle tile generation based on beatmap or random
+  const generateTile = useCallback((note?: Note) => {
+    let laneToUse: number;
+    let tileYPosition = -tileHeight;
+    let tileNoteTime: number | undefined = undefined;
+
+    if (note && audioRef.current) {
+      laneToUse = note.lane;
+      tileNoteTime = note.time;
+    } else {
+      laneToUse = Math.floor(Math.random() * lanes);
+    }
 
     setTiles(prev => [
       ...prev,
       {
         id: nextTileIdRef.current++,
-        lane,
-        y: -tileHeight,
+        lane: laneToUse,
+        y: tileYPosition,
         hit: false,
-        missed: false
+        missed: false,
+        targetTime: tileNoteTime
       }
     ]);
-  }, [lanes]);
+  }, [lanes, tileHeight]);
 
   // Handle tile clicking
   const handleTileClick = (tileId: number) => {
     setTiles(prev => prev.map(tile => {
       if (tile.id === tileId && !tile.hit && !tile.missed) {
-        // Increment score and combo
         setScore(s => s + 1 + combo);
         setCombo(c => c + 1);
 
-        // Show "Perfect" text if combo is a multiple of 5
         if ((combo + 1) % 5 === 0) {
           setShowPerfect(true);
           setTimeout(() => setShowPerfect(false), 1000);
@@ -80,36 +167,66 @@ const GameBoard: React.FC<GameBoardProps> = ({ songId, onGameOver }) => {
 
   // Game loop
   useEffect(() => {
-    if (isPaused) return;
+    if (isPaused || isLoadingBeatmap) {
+      if (gameLoopRef.current) {
+        cancelAnimationFrame(gameLoopRef.current);
+        gameLoopRef.current = null;
+      }
+      return;
+    }
+
+    const LOOKAHEAD_SECONDS = (boardHeight / speed) / 60;
 
     const updateGame = () => {
-      // Generate new tiles randomly
-      if (Math.random() < 0.03) {
-        generateTile();
+      if (!audioRef.current) {
+        gameLoopRef.current = requestAnimationFrame(updateGame);
+        return;
+      }
+      const currentTime = audioRef.current.currentTime;
+
+      let generatedFromBeatmap = false;
+      if (loadedBeatmap && loadedBeatmap.notes.length > 0 && nextNoteIndex < loadedBeatmap.notes.length) {
+        const nextNote = loadedBeatmap.notes[nextNoteIndex];
+        if (currentTime >= nextNote.time - LOOKAHEAD_SECONDS) {
+          generateTile(nextNote);
+          setNextNoteIndex(prev => prev + 1);
+          generatedFromBeatmap = true;
+        }
       }
 
-      // Update tile positions
+      if (!generatedFromBeatmap && !isLoadingBeatmap && (!loadedBeatmap || loadedBeatmap.notes.length === 0)) {
+        const now = Date.now();
+        if (now - lastTileTimeRef.current > (songData[songId]?.speed ? 10000 / songData[songId].speed : 700) ) {
+          if (Math.random() < 0.25) {
+             generateTile();
+          }
+          lastTileTimeRef.current = now;
+        }
+      }
+
       setTiles(prev => {
         let gameOver = false;
 
         const updatedTiles = prev.map(tile => {
-          // If the tile has been hit, move it faster to make it disappear
           const tileSpeed = tile.hit ? speed * 2 : speed;
           const newY = tile.y + tileSpeed;
 
-          // Mark tile as missed if it goes off the bottom of the board
           if (newY > boardHeight && !tile.hit && !tile.missed) {
-            gameOver = true;
-            return { ...tile, missed: true };
+            if (tile.targetTime !== undefined && currentTime > tile.targetTime + 0.2) {
+              gameOver = true;
+              return { ...tile, missed: true };
+            }
+            else if (tile.targetTime === undefined) {
+                gameOver = true;
+                return { ...tile, missed: true };
+            }
           }
 
           return { ...tile, y: newY };
         });
 
-        // Remove tiles that are far off screen
         const visibleTiles = updatedTiles.filter(tile => tile.y < boardHeight + 100);
 
-        // End game if a tile was missed
         if (gameOver) {
           if (gameLoopRef.current) {
             cancelAnimationFrame(gameLoopRef.current);
@@ -129,14 +246,23 @@ const GameBoard: React.FC<GameBoardProps> = ({ songId, onGameOver }) => {
     return () => {
       if (gameLoopRef.current) {
         cancelAnimationFrame(gameLoopRef.current);
+        gameLoopRef.current = null;
       }
     };
-  }, [generateTile, isPaused, onGameOver, score, speed]);
+  }, [generateTile, isPaused, onGameOver, score, speed, loadedBeatmap, isLoadingBeatmap, nextNoteIndex, songId, boardHeight]);
 
-  // Pause/resume game when visibility changes
+  // Pause/resume game and audio when visibility changes
   useEffect(() => {
     const handleVisibilityChange = () => {
-      setIsPaused(document.hidden);
+      const currentlyPaused = document.hidden;
+      setIsPaused(currentlyPaused);
+      if (audioRef.current) {
+        if (currentlyPaused) {
+          audioRef.current.pause();
+        } else {
+          audioRef.current.play().catch(error => console.error("Error resuming audio:", error));
+        }
+      }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -152,13 +278,11 @@ const GameBoard: React.FC<GameBoardProps> = ({ songId, onGameOver }) => {
         {combo > 1 && <div className="text-lg">Combo: x{combo}</div>}
       </div>
 
-      {/* Game board */}
       <div
         ref={boardRef}
         className="relative bg-gradient-to-b from-violet-900/30 to-indigo-900/30 backdrop-blur-sm rounded-lg overflow-hidden"
         style={{ width: `${lanes * 80}px`, height: `${boardHeight}px` }}
       >
-        {/* Render lane dividers */}
         {Array.from({ length: lanes - 1 }).map((_, index) => (
           <div
             key={index}
@@ -167,7 +291,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ songId, onGameOver }) => {
           />
         ))}
 
-        {/* Render tiles */}
         {tiles.map(tile => (
           <div
             key={tile.id}
@@ -187,7 +310,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ songId, onGameOver }) => {
           />
         ))}
 
-        {/* Perfect combo text */}
         {showPerfect && (
           <div className="absolute top-1/3 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-pink-300 font-bold text-4xl animate-bounce">
             PERFECT!
@@ -195,7 +317,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ songId, onGameOver }) => {
         )}
       </div>
 
-      {/* Song title */}
       <div className="mt-4 text-center">
         <p>Playing: {songData[songId]?.name || "Unknown Song"}</p>
       </div>

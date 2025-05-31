@@ -5,6 +5,7 @@ interface GameOverProps {
   highScore: number;
   onRestart: () => void;
   onBackToMenu: () => void;
+  songName?: string;
 }
 
 const GameOver: React.FC<GameOverProps> = ({
@@ -12,6 +13,7 @@ const GameOver: React.FC<GameOverProps> = ({
   highScore,
   onRestart,
   onBackToMenu,
+  songName,
 }) => {
   const [isNewHighScore, setIsNewHighScore] = useState(false);
   const [animatedScore, setAnimatedScore] = useState(0);
@@ -36,6 +38,7 @@ const GameOver: React.FC<GameOverProps> = ({
   return (
     <div className="w-full max-w-md bg-violet-950/50 backdrop-blur-sm p-8 rounded-xl shadow-lg text-center">
       <h2 className="text-3xl font-bold mb-2">Game Over</h2>
+      {songName && <p className="text-violet-300 mb-4">Song: {songName}</p>}
 
       <div className="relative mt-8 mb-6">
         <div className="text-5xl font-bold mb-2">{animatedScore}</div>
