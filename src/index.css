@@ -60,3 +60,52 @@ body {
   --chart-4: 280 65% 60%;
   --chart-5: 340 75% 55%;
 }
+
+/* Custom Animations for Tiles */
+@keyframes tile-hit-pop {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes tile-miss-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  50% { transform: translateX(5px); }
+  75% { transform: translateX(-3px); }
+}
+
+@keyframes tile-spawn-fade-in {
+  from { opacity: 0; transform: translateY(-20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-tile-hit-pop {
+  animation: tile-hit-pop 0.3s ease-out;
+}
+
+.animate-tile-miss-shake {
+  animation: tile-miss-shake 0.4s ease-in-out;
+}
+
+.animate-tile-spawn-fade-in {
+  animation: tile-spawn-fade-in 0.3s ease-out;
+}
+
+/* Animated Gradient Background */
+@keyframes animated-gradient {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.background-animate {
+  background-size: 200% 200%; /* Needs to be larger than 100% for position animation to work */
+  animation: animated-gradient 15s ease infinite;
+}

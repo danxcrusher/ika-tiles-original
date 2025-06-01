@@ -56,7 +56,7 @@ const App = () => {
   };
 
   return (
-    <div className="flex h-screen w-screen flex-col items-center justify-center bg-gradient-to-br from-purple-900 via-violet-800 to-indigo-900 text-white overflow-hidden p-4">
+    <div className="flex h-screen w-screen flex-col items-center justify-center bg-gradient-to-br from-purple-900 via-violet-800 to-indigo-900 text-white overflow-hidden p-4 background-animate">
       <h1 className="mb-6 text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-violet-500 drop-shadow-md">
         Magic Tiles
       </h1>

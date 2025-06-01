@@ -7,6 +7,7 @@ interface Tile {
   hit: boolean;
   missed: boolean;
   targetTime?: number; // Time the tile should be tapped
+  animationState?: 'spawning' | 'hit' | 'missed' | null; // For triggering one-off animations
 }
 
 interface Note {
@@ -147,9 +148,15 @@ const GameBoard: React.FC<GameBoardProps> = ({ songId, audioUrl, onGameOver }) =
         y: tileYPosition,
         hit: false,
         missed: false,
-        targetTime: tileNoteTime
+        targetTime: tileNoteTime,
+        animationState: 'spawning',
       }
     ]);
+    setTimeout(() => {
+      setTiles(prevTiles => prevTiles.map(t => 
+        t.id === nextTileIdRef.current - 1 ? { ...t, animationState: null } : t
+      ));
+    }, 300);
   }, [lanes, tileHeight]);
 
   // Handle tile clicking
@@ -163,8 +170,15 @@ const GameBoard: React.FC<GameBoardProps> = ({ songId, audioUrl, onGameOver }) =
           setShowPerfect(true);
           setTimeout(() => setShowPerfect(false), 1000);
         }
+        const updatedTile = { ...tile, hit: true, animationState: 'hit' as const };
 
-        return { ...tile, hit: true };
+        setTimeout(() => {
+          setTiles(prevTiles => prevTiles.map(t => 
+            t.id === tileId ? { ...t, animationState: null } : t
+          ));
+        }, 300);
+
+        return updatedTile;
       }
       return tile;
     }));
@@ -216,14 +230,19 @@ const GameBoard: React.FC<GameBoardProps> = ({ songId, audioUrl, onGameOver }) =
           const newY = tile.y + tileSpeed;
 
           if (newY > boardHeight && !tile.hit && !tile.missed) {
+            let missedTile = { ...tile, missed: true, animationState: 'missed' as const };
             if (tile.targetTime !== undefined && currentTime > tile.targetTime + 0.2) {
               gameOver = true;
-              return { ...tile, missed: true };
             }
             else if (tile.targetTime === undefined) {
                 gameOver = true;
-                return { ...tile, missed: true };
             }
+            setTimeout(() => {
+              setTiles(prevTiles => prevTiles.map(t => 
+                t.id === tile.id ? { ...t, animationState: null } : t
+              ));
+            }, 400);
+            return missedTile;
           }
 
           return { ...tile, y: newY };
@@ -295,24 +314,35 @@ const GameBoard: React.FC<GameBoardProps> = ({ songId, audioUrl, onGameOver }) =
           />
         ))}
 
-        {tiles.map(tile => (
-          <div
-            key={tile.id}
-            className={`absolute w-[80px] ${
-              tile.hit
-                ? 'bg-green-500/50 border-green-400'
-                : tile.missed
-                  ? 'bg-red-500/50 border-red-400'
-                  : 'bg-black border-violet-400 cursor-pointer hover:bg-black/80'
-            } border-2 rounded-sm transition-colors`}
-            style={{
-              left: `${tile.lane * 80}px`,
-              top: `${tile.y}px`,
-              height: `${tileHeight}px`,
-            }}
-            onClick={() => !tile.hit && !tile.missed && handleTileClick(tile.id)}
-          />
-        ))}
+        {tiles.map(tile => {
+          let animationClass = '';
+          if (tile.animationState === 'spawning') {
+            animationClass = 'animate-tile-spawn-fade-in';
+          } else if (tile.animationState === 'hit') {
+            animationClass = 'animate-tile-hit-pop';
+          } else if (tile.animationState === 'missed') {
+            animationClass = 'animate-tile-miss-shake';
+          }
+
+          return (
+            <div
+              key={tile.id}
+              className={`absolute w-[80px] ${animationClass} ${
+                tile.hit
+                  ? 'bg-green-500/50 border-green-400'
+                  : tile.missed
+                    ? 'bg-red-500/50 border-red-400'
+                    : 'bg-black border-violet-400 cursor-pointer hover:bg-black/80'
+              } border-2 rounded-sm transition-colors`}
+              style={{
+                left: `${tile.lane * 80}px`,
+                top: `${tile.y}px`,
+                height: `${tileHeight}px`,
+              }}
+              onClick={() => !tile.hit && !tile.missed && handleTileClick(tile.id)}
+            />
+          );
+        })}
 
         {showPerfect && (
           <div className="absolute top-1/3 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-pink-300 font-bold text-4xl animate-bounce">
